@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>4 Memory Game</title>
+    <title>4 Memory Game with Automatic Fullscreen</title>
     <style>
         body {
             background-color: #1e1e24;
@@ -17,27 +17,22 @@
             margin: 0;
             overflow: hidden;
         }
-
         h1 {
             margin-bottom: 5px;
             font-size: 2.5rem;
             letter-spacing: 2px;
             color: #f0f0f0;
         }
-
         #score-board {
             font-size: 1.2rem;
             margin-bottom: 25px;
             color: #aaaaaa;
         }
-
-        /* Game Board Container */
         .game-container {
             position: relative;
             width: 320px;
             height: 320px;
         }
-
         .board {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -45,8 +40,6 @@
             width: 100%;
             height: 100%;
         }
-
-        /* Individual Pads */
         .pad {
             border-radius: 15px;
             cursor: pointer;
@@ -54,24 +47,19 @@
             opacity: 0.6;
             box-shadow: 0 8px 16px rgba(0,0,0,0.3);
         }
-
         .pad:active {
             transform: scale(0.96);
         }
-
         .pad.active {
             opacity: 1 !important;
             filter: brightness(1.3);
             box-shadow: 0 0 25px currentColor;
         }
-
-        /* Retro Color Palette */
-        #green  { background-color: #2ec4b6; color: #2ec4b6; }
-        #red    { background-color: #e71d36; color: #e71d36; }
+        #green { background-color: #2ec4b6; color: #2ec4b6; }
+        #red { background-color: #e71d36; color: #e71d36; }
         #yellow { background-color: #ff9f1c; color: #ff9f1c; }
-        #blue   { background-color: #011627; color: #011627; border: 1px solid #003366; }
+        #blue { background-color: #011627; color: #011627; border: 1px solid #003366; }
 
-        /* Central Control Button */
         .center-button {
             position: absolute;
             top: 50%;
@@ -88,16 +76,83 @@
             cursor: pointer;
             box-shadow: 0 4px 10px rgba(0,0,0,0.5);
             transition: all 0.2s ease;
+            z-index: 2;
         }
-
         .center-button:hover {
             background-color: #2a2a32;
             border-color: #444450;
         }
-
-        /* Disabled state during playback */
         .unclickable {
             pointer-events: none;
+        }
+
+        /* Utility Layout Controls */
+        .controls-wrapper {
+            display: flex;
+            gap: 15px;
+            margin-top: 20px;
+        }
+        .utility-btn {
+            background: #33333a;
+            border: none;
+            color: #aaa;
+            padding: 8px 16px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .utility-btn:hover {
+            background: #444450;
+            color: #fff;
+        }
+        
+        /* Leaderboard Modal UI */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+        }
+        .modal-content {
+            background: #2a2a32;
+            padding: 30px;
+            border-radius: 15px;
+            width: 280px;
+            text-align: center;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+        }
+        .modal-content h2 {
+            margin-top: 0;
+            color: #ff9f1c;
+        }
+        .leaderboard-list {
+            list-style: none;
+            padding: 0;
+            margin: 20px 0;
+            text-align: left;
+        }
+        .leaderboard-list li {
+            padding: 8px 12px;
+            border-bottom: 1px solid #33333a;
+            display: flex;
+            justify-content: space-between;
+        }
+        .leaderboard-list li:last-child {
+            border: none;
+        }
+        .rank {
+            font-weight: bold;
+            color: #2ec4b6;
         }
     </style>
 </head>
@@ -116,61 +171,94 @@
         <button class="center-button" id="start-btn" onclick="startGame()">START</button>
     </div>
 
+    <div class="controls-wrapper">
+        <button class="utility-btn" onclick="toggleLeaderboard(true)">🏆 View Leaderboard</button>
+        <button class="utility-btn" id="fs-btn" onclick="toggleFullscreen()">📺 Go Fullscreen</button>
+    </div>
+
+    <!-- Leaderboard Modal Panel -->
+    <div class="modal" id="leaderboard-modal">
+        <div class="modal-content">
+            <h2>🏆 TOP SCORERS</h2>
+            <ul class="leaderboard-list" id="leaderboard-list">
+                <!-- Scores injected via JS -->
+            </ul>
+            <button class="utility-btn" style="margin: 0 auto;" onclick="toggleLeaderboard(false)">Close</button>
+        </div>
+    </div>
+
     <script>
-        // Game State Variables
         let gameSequence = [];
         let playerSequence = [];
         let score = 0;
-        let highScore = 0;
+
+        // Initialize High Score and Leaderboard from LocalStorage
+        let highScore = localStorage.getItem('memoryHighScore') ? parseInt(localStorage.getItem('memoryHighScore')) : 0;
+        let leaderboard = localStorage.getItem('memoryLeaderboard') ? JSON.parse(localStorage.getItem('memoryLeaderboard')) : [];
+
         const colors = ['green', 'red', 'yellow', 'blue'];
-       
-        // Harmonic frequencies for the classic electronic feel
-        const frequencies = {
-            green: 315,
-            red: 252,
-            yellow: 209,
-            blue: 168
-        };
+        const frequencies = { green: 315, red: 252, yellow: 209, blue: 168 };
+        let audioCtx = null;
 
-        // Web Audio Context setup
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        // Update Initial Display
+        updateScoreDisplay();
+        renderLeaderboard();
 
-        function playTone(color, duration = 300) {
+        // Listen for standard manual fullscreen updates to keep the button label synced
+        document.addEventListener('fullscreenchange', () => {
+            const fsBtn = document.getElementById('fs-btn');
+            if (document.fullscreenElement) {
+                fsBtn.innerHTML = '📺 Exit Fullscreen';
+            } else {
+                fsBtn.innerHTML = '📺 Go Fullscreen';
+            }
+        });
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
             if (audioCtx.state === 'suspended') {
                 audioCtx.resume();
             }
-           
+        }
+
+        function playTone(color, duration = 300) {
+            initAudio();
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
-           
-            // Custom sound profile (Triangle wave sounds close to classic chip-tune)
+            
             osc.type = 'triangle';
             osc.frequency.setValueAtTime(frequencies[color], audioCtx.currentTime);
-           
+            
             gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
             gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration / 1000);
-           
+            
             osc.connect(gain);
             gain.connect(audioCtx.destination);
-           
+            
             osc.start();
             osc.stop(audioCtx.currentTime + duration / 1000);
         }
 
         function playBuzzer() {
+            initAudio();
             const osc = audioCtx.createOscillator();
             const gain = audioCtx.createGain();
+            
             osc.type = 'sawtooth';
-            osc.frequency.setValueAtTime(85, audioCtx.currentTime); // Low harsh frequency
+            osc.frequency.setValueAtTime(85, audioCtx.currentTime);
+            
             gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
             gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.6);
+            
             osc.connect(gain);
             gain.connect(audioCtx.destination);
+            
             osc.start();
             osc.stop(audioCtx.currentTime + 0.6);
         }
 
-        // Visual flash effect
         function flashPad(color) {
             const pad = document.getElementById(color);
             pad.classList.add('active');
@@ -180,8 +268,28 @@
             }, 250);
         }
 
-        // Core Game Loops
+        function requestFullscreenSafe() {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(err => {
+                    console.log(`Error attempting to enable full-screen mode: ${err.message}`);
+                });
+            }
+        }
+
+        function toggleFullscreen() {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(err => {
+                    console.log(`Error enabling full-screen mode: ${err.message}`);
+                });
+            } else {
+                document.exitFullscreen();
+            }
+        }
+
         function startGame() {
+            initAudio();
+            requestFullscreenSafe(); // Automatically triggers full-screen on user action
+            
             gameSequence = [];
             score = 0;
             document.getElementById('start-btn').style.display = 'none';
@@ -191,63 +299,6 @@
 
         function nextRound() {
             playerSequence = [];
-            // Add a random color to the sequence
             const randomColor = colors[Math.floor(Math.random() * 4)];
             gameSequence.push(randomColor);
-           
-            // Lock out player input during playback
-            document.getElementById('game-board').classList.add('unclickable');
-           
-            // Playback the sequence to the user
-            let i = 0;
-            const interval = setInterval(() => {
-                flashPad(gameSequence[i]);
-                i++;
-                if (i >= gameSequence.length) {
-                    clearInterval(interval);
-                    // Unlock player input after brief delay
-                    setTimeout(() => {
-                        document.getElementById('game-board').classList.remove('unclickable');
-                    }, 300);
-                }
-            }, 600); // Speed of computer playback
-        }
-
-        function handlePadClick(color) {
-            flashPad(color);
-            playerSequence.push(color);
-           
-            // Check correctness of current click
-            const currentStep = playerSequence.length - 1;
-            if (playerSequence[currentStep] !== gameSequence[currentStep]) {
-                gameOver();
-                return;
-            }
-           
-            // Check if player finished the entire sequence
-            if (playerSequence.length === gameSequence.length) {
-                score++;
-                if (score > highScore) {
-                    highScore = score;
-                }
-                updateScoreDisplay();
-                document.getElementById('game-board').classList.add('unclickable');
-                setTimeout(nextRound, 1000); // 1-second breather before next level
-            }
-        }
-
-        function gameOver() {
-            playBuzzer();
-            document.getElementById('game-board').classList.add('unclickable');
-            const startBtn = document.getElementById('start-btn');
-            startBtn.innerText = "RETRY";
-            startBtn.style.display = 'block';
-            alert(`Game Over! You matched ${score} sequences.`);
-        }
-
-        function updateScoreDisplay() {
-            document.getElementById('score-board').innerHTML = `Score: ${score} | High Score: <span id="high-score">${highScore}</span>`;
-        }
-    </script>
-</body>
-</html>
+            
