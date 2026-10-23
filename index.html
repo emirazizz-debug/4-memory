@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>4 Memory Game</title>
+    <style>
+        body {
+            background-color: #1e1e24;
+            color: #ffffff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+        }
+
+        h1 {
+            margin-bottom: 5px;
+            font-size: 2.5rem;
+            letter-spacing: 2px;
+            color: #f0f0f0;
+        }
+
+        #score-board {
+            font-size: 1.2rem;
+            margin-bottom: 25px;
+            color: #aaaaaa;
+        }
+
+        /* Game Board Container */
+        .game-container {
+            position: relative;
+            width: 320px;
+            height: 320px;
+        }
+
+        .board {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Individual Pads */
+        .pad {
+            border-radius: 15px;
+            cursor: pointer;
+            transition: opacity 0.1s ease, transform 0.05s ease;
+            opacity: 0.6;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.3);
+        }
+
+        .pad:active {
+            transform: scale(0.96);
+        }
+
+        .pad.active {
+            opacity: 1 !important;
+            filter: brightness(1.3);
+            box-shadow: 0 0 25px currentColor;
+        }
+
+        /* Retro Color Palette */
+        #green  { background-color: #2ec4b6; color: #2ec4b6; }
+        #red    { background-color: #e71d36; color: #e71d36; }
+        #yellow { background-color: #ff9f1c; color: #ff9f1c; }
+        #blue   { background-color: #011627; color: #011627; border: 1px solid #003366; }
+
+        /* Central Control Button */
+        .center-button {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 90px;
+            height: 90px;
+            background-color: #1e1e24;
+            border: 5px solid #33333a;
+            border-radius: 50%;
+            color: #ffffff;
+            font-weight: bold;
+            font-size: 0.9rem;
+            cursor: pointer;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+            transition: all 0.2s ease;
+        }
+
+        .center-button:hover {
+            background-color: #2a2a32;
+            border-color: #444450;
+        }
+
+        /* Disabled state during playback */
+        .unclickable {
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>4 MEMORY</h1>
+    <div id="score-board">Score: 0 | High Score: <span id="high-score">0</span></div>
+
+    <div class="game-container">
+        <div class="board unclickable" id="game-board">
+            <div class="pad" id="green" onclick="handlePadClick('green')"></div>
+            <div class="pad" id="red" onclick="handlePadClick('red')"></div>
+            <div class="pad" id="yellow" onclick="handlePadClick('yellow')"></div>
+            <div class="pad" id="blue" onclick="handlePadClick('blue')"></div>
+        </div>
+        <button class="center-button" id="start-btn" onclick="startGame()">START</button>
+    </div>
+
+    <script>
+        // Game State Variables
+        let gameSequence = [];
+        let playerSequence = [];
+        let score = 0;
+        let highScore = 0;
+        const colors = ['green', 'red', 'yellow', 'blue'];
+       
+        // Harmonic frequencies for the classic electronic feel
+        const frequencies = {
+            green: 315,
+            red: 252,
+            yellow: 209,
+            blue: 168
+        };
+
+        // Web Audio Context setup
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+        function playTone(color, duration = 300) {
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+           
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+           
+            // Custom sound profile (Triangle wave sounds close to classic chip-tune)
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(frequencies[color], audioCtx.currentTime);
+           
+            gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration / 1000);
+           
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+           
+            osc.start();
+            osc.stop(audioCtx.currentTime + duration / 1000);
+        }
+
+        function playBuzzer() {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(85, audioCtx.currentTime); // Low harsh frequency
+            gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.6);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.6);
+        }
+
+        // Visual flash effect
+        function flashPad(color) {
+            const pad = document.getElementById(color);
+            pad.classList.add('active');
+            playTone(color);
+            setTimeout(() => {
+                pad.classList.remove('active');
+            }, 250);
+        }
+
+        // Core Game Loops
+        function startGame() {
+            gameSequence = [];
+            score = 0;
+            document.getElementById('start-btn').style.display = 'none';
+            updateScoreDisplay();
+            nextRound();
+        }
+
+        function nextRound() {
+            playerSequence = [];
+            // Add a random color to the sequence
+            const randomColor = colors[Math.floor(Math.random() * 4)];
+            gameSequence.push(randomColor);
+           
+            // Lock out player input during playback
+            document.getElementById('game-board').classList.add('unclickable');
+           
+            // Playback the sequence to the user
+            let i = 0;
+            const interval = setInterval(() => {
+                flashPad(gameSequence[i]);
+                i++;
+                if (i >= gameSequence.length) {
+                    clearInterval(interval);
+                    // Unlock player input after brief delay
+                    setTimeout(() => {
+                        document.getElementById('game-board').classList.remove('unclickable');
+                    }, 300);
+                }
+            }, 600); // Speed of computer playback
+        }
+
+        function handlePadClick(color) {
+            flashPad(color);
+            playerSequence.push(color);
+           
+            // Check correctness of current click
+            const currentStep = playerSequence.length - 1;
+            if (playerSequence[currentStep] !== gameSequence[currentStep]) {
+                gameOver();
+                return;
+            }
+           
+            // Check if player finished the entire sequence
+            if (playerSequence.length === gameSequence.length) {
+                score++;
+                if (score > highScore) {
+                    highScore = score;
+                }
+                updateScoreDisplay();
+                document.getElementById('game-board').classList.add('unclickable');
+                setTimeout(nextRound, 1000); // 1-second breather before next level
+            }
+        }
+
+        function gameOver() {
+            playBuzzer();
+            document.getElementById('game-board').classList.add('unclickable');
+            const startBtn = document.getElementById('start-btn');
+            startBtn.innerText = "RETRY";
+            startBtn.style.display = 'block';
+            alert(`Game Over! You matched ${score} sequences.`);
+        }
+
+        function updateScoreDisplay() {
+            document.getElementById('score-board').innerHTML = `Score: ${score} | High Score: <span id="high-score">${highScore}</span>`;
+        }
+    </script>
+</body>
+</html>
